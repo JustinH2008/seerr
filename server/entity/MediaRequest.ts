@@ -83,6 +83,16 @@ export class MediaRequest {
         throw e;
       }
 
+      const owner = await mediaRepository.findOne({
+        where: { tvdbId: media.tvdbId },
+      });
+
+      // a transient failure leaves the ID unowned, and dropping it there would
+      // persist NULL over a valid one
+      if (!owner || owner.id === media.id) {
+        throw e;
+      }
+
       logger.warn('Dropped TVDB ID after a conflict on save', {
         label: 'Media Request',
         tmdbId: media.tmdbId,
