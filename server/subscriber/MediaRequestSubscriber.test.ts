@@ -128,7 +128,7 @@ async function seedApprovedRequest(
   tvdbId?: number
 ) {
   const requester = await getRepository(User).findOneOrFail({
-    where: { email: 'friend@seerr.dev' },
+    where: { email: 'demo@seerr.dev' },
   });
 
   const media = await getRepository(Media).save(

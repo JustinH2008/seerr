@@ -1648,7 +1648,7 @@ describe('POST /request (tv), TVDB ID backfill', () => {
 
     const media = await seedUntrackedShow(88010);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post('/request').send({
       mediaType: MediaType.TV,
       mediaId: 88010,
@@ -1670,7 +1670,7 @@ describe('POST /request (tv), TVDB ID backfill', () => {
 
     await seedUntrackedShow(87012, 184871);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post('/request').send({
       mediaType: MediaType.TV,
       mediaId: 34549,
@@ -1693,7 +1693,7 @@ describe('POST /request (tv), TVDB ID backfill', () => {
     await seedUntrackedShow(88011, 184871);
     const media = await seedUntrackedShow(88012);
 
-    const agent = await loginAs('friend@seerr.dev', 'test1234');
+    const agent = await loginAs('demo@seerr.dev', 'test1234');
     const res = await agent.post('/request').send({
       mediaType: MediaType.TV,
       mediaId: 88012,
