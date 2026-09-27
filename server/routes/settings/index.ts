@@ -597,6 +597,18 @@ settingsRoutes.post(
         }
       }
     }
+    const settingsSnapshot = {
+      mediaServerType: settings.main.mediaServerType,
+      defaultPermissions: settings.main.defaultPermissions,
+      plex: {
+        ...settings.plex,
+        libraries: [...settings.plex.libraries],
+      },
+      jellyfin: {
+        ...settings.jellyfin,
+        libraries: [...settings.jellyfin.libraries],
+      },
+    };
 
     try {
       if (current === MediaServerType.PLEX) {
@@ -628,10 +640,11 @@ settingsRoutes.post(
           { ratingKey: Not('') },
           { ratingKey: '' }
         );
-        await getRepository(UserSettings).update(
-          {},
-          { watchlistSyncMovies: false, watchlistSyncTv: false }
-        );
+        await getRepository(UserSettings)
+          .createQueryBuilder()
+          .update(UserSettings)
+          .set({ watchlistSyncMovies: false, watchlistSyncTv: false })
+          .execute();
         const plexAutoRequestPermissions =
           Permission.AUTO_REQUEST |
           Permission.AUTO_REQUEST_MOVIE |
@@ -742,6 +755,10 @@ settingsRoutes.post(
         label: 'Settings',
         errorMessage: (e as Error).message,
       });
+      settings.main.mediaServerType = settingsSnapshot.mediaServerType;
+      settings.main.defaultPermissions = settingsSnapshot.defaultPermissions;
+      settings.plex = settingsSnapshot.plex;
+      settings.jellyfin = settingsSnapshot.jellyfin;
       return next({ status: 500, message: 'Failed to switch media server.' });
     }
   }
