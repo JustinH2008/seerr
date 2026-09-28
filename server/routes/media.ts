@@ -1,7 +1,4 @@
-import RadarrAPI from '@server/api/servarr/radarr';
-import SonarrAPI from '@server/api/servarr/sonarr';
 import TautulliAPI from '@server/api/tautulli';
-import TheMovieDb from '@server/api/themoviedb';
 import { MediaStatus, MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
@@ -11,6 +8,13 @@ import type {
   MediaResultsResponse,
   MediaWatchDataResponse,
 } from '@server/interfaces/api/mediaInterfaces';
+import {
+  NotARequesterError,
+  deleteMediaFiles,
+  getRemovalSummary,
+  requestMediaRemoval,
+  withdrawMediaRemoval,
+} from '@server/lib/mediaRemoval';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -200,100 +204,104 @@ mediaRoutes.delete(
   }
 );
 
+mediaRoutes.get('/:id/removal', async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return next({ status: 401, message: 'Authentication required.' });
+    }
+    const summary = await getRemovalSummary(
+      Number(req.params.id),
+      String(req.query.is4k) === 'true',
+      req.user.id
+    );
+    if (
+      !summary.requesters.some((requester) => requester.id === req.user?.id) &&
+      !req.user.hasPermission(Permission.MANAGE_REQUESTS)
+    ) {
+      return next({
+        status: 403,
+        message: 'You can only view removal for a title you requested.',
+      });
+    }
+    return res.status(200).json(summary);
+  } catch (e) {
+    if (e instanceof Error && e.message === 'Media not found') {
+      return next({ status: 404, message: 'Media not found' });
+    }
+    next({ status: 500, message: 'Failed to load removal status' });
+  }
+});
+
+mediaRoutes.post('/:id/removal', async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return next({ status: 401, message: 'Authentication required.' });
+    }
+    const summary = await requestMediaRemoval(
+      Number(req.params.id),
+      req.user,
+      String(req.query.is4k) === 'true'
+    );
+    return res.status(200).json(summary);
+  } catch (e) {
+    if (e instanceof NotARequesterError) {
+      return next({ status: 403, message: e.message });
+    }
+    if (e instanceof Error && e.message === 'Media not found') {
+      return next({ status: 404, message: 'Media not found' });
+    }
+    logger.error('Something went wrong requesting media removal', {
+      label: 'Media',
+      mediaId: req.params.id,
+      message: e.message,
+    });
+    next({ status: 500, message: 'Failed to request media removal' });
+  }
+});
+
+mediaRoutes.delete('/:id/removal', async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return next({ status: 401, message: 'Authentication required.' });
+    }
+    const summary = await withdrawMediaRemoval(
+      Number(req.params.id),
+      req.user,
+      String(req.query.is4k) === 'true'
+    );
+    return res.status(200).json(summary);
+  } catch (e) {
+    if (e instanceof NotARequesterError) {
+      return next({ status: 403, message: e.message });
+    }
+    next({ status: 500, message: 'Failed to cancel the removal request' });
+  }
+});
+
 mediaRoutes.delete(
   '/:id/file',
   isAuthenticated(Permission.MANAGE_REQUESTS),
   async (req, res, next) => {
     try {
-      const settings = getSettings();
       const mediaRepository = getRepository(Media);
       const media = await mediaRepository.findOneOrFail({
         where: { id: Number(req.params.id) },
       });
-
       const is4k = String(req.query.is4k) === 'true';
-      const isMovie = media.mediaType === MediaType.MOVIE;
 
-      let serviceSettings;
-      if (isMovie) {
-        serviceSettings = settings.radarr.find(
-          (radarr) => radarr.isDefault && radarr.is4k === is4k
-        );
-      } else {
-        serviceSettings = settings.sonarr.find(
-          (sonarr) => sonarr.isDefault && sonarr.is4k === is4k
-        );
-      }
-
-      const specificServiceId = is4k ? media.serviceId4k : media.serviceId;
-      if (
-        specificServiceId &&
-        specificServiceId >= 0 &&
-        serviceSettings?.id !== specificServiceId
-      ) {
-        if (isMovie) {
-          serviceSettings = settings.radarr.find(
-            (radarr) => radarr.id === specificServiceId
-          );
-        } else {
-          serviceSettings = settings.sonarr.find(
-            (sonarr) => sonarr.id === specificServiceId
-          );
-        }
-      }
-
-      if (!serviceSettings) {
-        const arrName = `${is4k ? '4K ' : ''}${isMovie ? 'Radarr' : 'Sonarr'}`;
-        logger.info(
-          `There is no default ${arrName} server configured. Did you set any of your ${arrName} servers as default?`,
-          {
-            label: 'Media Request',
-            mediaId: media.id,
-          }
-        );
-        return next({
-          status: 409,
-          message: `No ${arrName} server configured to delete media files`,
-        });
-      }
-
-      let service;
-      if (isMovie) {
-        service = new RadarrAPI({
-          apiKey: serviceSettings?.apiKey,
-          url: RadarrAPI.buildUrl(serviceSettings, '/api/v3'),
-        });
-      } else {
-        service = new SonarrAPI({
-          apiKey: serviceSettings?.apiKey,
-          url: SonarrAPI.buildUrl(serviceSettings, '/api/v3'),
-        });
-      }
-
-      if (isMovie) {
-        await (service as RadarrAPI).removeMovie(media.tmdbId);
-      } else {
-        const tmdb = new TheMovieDb();
-        const series = await tmdb.getTvShow({ tvId: media.tmdbId });
-        const tvdbId = series.external_ids.tvdb_id ?? media.tvdbId;
-        if (!tvdbId) {
-          throw new Error('TVDB ID not found');
-        }
-        await (service as SonarrAPI).removeSeries(tvdbId);
-
-        for (const season of media.seasons) {
-          season[is4k ? 'status4k' : 'status'] = MediaStatus.DELETED;
-        }
-      }
-
-      media[is4k ? 'status4k' : 'status'] = MediaStatus.DELETED;
-      media.resetServiceData(is4k);
-      await mediaRepository.save(media);
+      await deleteMediaFiles(media, is4k);
 
       return res.status(204).send();
     } catch (e) {
       if (e instanceof EntityNotFoundError) {
         return next({ status: 404, message: 'Media not found' });
+      }
+      if (
+        e instanceof Error &&
+        e.message.startsWith('No ') &&
+        e.message.includes('server configured')
+      ) {
+        return next({ status: 409, message: e.message });
       }
       logger.error('Something went wrong deleting media file', {
         label: 'Media',

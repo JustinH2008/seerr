@@ -21,6 +21,11 @@ import type {
   MediaRequestBody,
   RequestResultsResponse,
 } from '@server/interfaces/api/requestInterfaces';
+import {
+  getRemovalSummariesForRequests,
+  getRemovalSummary,
+  removalSummaryKey,
+} from '@server/lib/mediaRemoval';
 import { Permission } from '@server/lib/permissions';
 import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
@@ -273,6 +278,26 @@ requestRoutes.get<Record<string, unknown>, RequestResultsResponse>(
         });
       }
 
+      if (req.user && mappedRequests.length > 0) {
+        const summaries = await getRemovalSummariesForRequests(
+          mappedRequests.flatMap((request) =>
+            request?.media?.id != null
+              ? [{ mediaId: request.media.id, is4k: !!request.is4k }]
+              : []
+          ),
+          req.user.id
+        );
+        mappedRequests = mappedRequests.map((request) => {
+          if (!request?.media?.id) {
+            return request;
+          }
+          const removal = summaries.get(
+            removalSummaryKey(request.media.id, !!request.is4k)
+          );
+          return removal ? { ...request, removal } : request;
+        });
+      }
+
       return res.status(200).json({
         pageInfo: {
           pages: Math.ceil(requestCount / pageSize),
@@ -437,7 +462,7 @@ requestRoutes.get('/:requestId', async (req, res, next) => {
   try {
     const request = await requestRepository.findOneOrFail({
       where: { id: Number(req.params.requestId) },
-      relations: { requestedBy: true, modifiedBy: true },
+      relations: { requestedBy: true, modifiedBy: true, media: true },
     });
 
     if (
@@ -453,7 +478,18 @@ requestRoutes.get('/:requestId', async (req, res, next) => {
       });
     }
 
-    return res.status(200).json(request);
+    const removal = await getRemovalSummary(
+      request.media.id,
+      request.is4k,
+      req.user?.id
+    );
+    const visible = removal.requesters.some(
+      (requester) => requester.id === req.user?.id
+    )
+      ? removal
+      : null;
+
+    return res.status(200).json({ ...request, removal: visible });
   } catch (e) {
     logger.debug('Failed to retrieve request.', {
       label: 'API',

@@ -6,6 +6,12 @@ export interface RequestResultsResponse extends PaginatedResponse {
   results: (NonFunctionProperties<MediaRequest> & {
     profileName?: string;
     canRemove?: boolean;
+    removal?: {
+      required: number;
+      received: number;
+      currentUserRequested: boolean;
+      removed: boolean;
+    } | null;
   })[];
   serviceErrors: {
     radarr: { id: number; name: string }[];

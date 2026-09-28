@@ -52,10 +52,118 @@ const messages = defineMessages('components.RequestList.RequestItem', {
   removearr: 'Remove from {arr}',
   removemediaerror: 'Something went wrong while removing the media.',
   profileName: 'Profile',
+  requestremoval: 'Request Removal',
+  cancelremovalrequest: 'Cancel Removal Request',
+  removalprogress:
+    '{received} of {required} {required, plural, one {person who requested this title has} other {people who requested this title have}} asked to remove it.',
+  removalwaiting:
+    'Removal requested. {received} of {required} people have asked to remove this title.',
+  removalremoved: 'The title was removed from {arr}.',
+  removalerror: 'Something went wrong while requesting removal.',
 });
 
 const isMovie = (movie: MovieDetails | TvDetails): movie is MovieDetails => {
   return (movie as MovieDetails).title !== undefined;
+};
+
+interface RemovalSummary {
+  required: number;
+  received: number;
+  currentUserRequested: boolean;
+  removed: boolean;
+}
+
+const RemovalRequestButton = ({
+  mediaId,
+  is4k,
+  arrName,
+  initial,
+  onChanged,
+}: {
+  mediaId: number;
+  is4k: boolean;
+  arrName: string;
+  initial?: RemovalSummary | null;
+  onChanged: () => void;
+}) => {
+  const intl = useIntl();
+  const { addToast } = useToasts();
+  const [summary, setSummary] = useState<RemovalSummary | null>(
+    initial ?? null
+  );
+  const [pending, setPending] = useState(false);
+
+  const submit = async (method: 'post' | 'delete') => {
+    setPending(true);
+    try {
+      const response = await axios.request<RemovalSummary>({
+        method,
+        url: `/api/v1/media/${mediaId}/removal?is4k=${is4k}`,
+      });
+      setSummary(response.data);
+      onChanged();
+      addToast(
+        intl.formatMessage(
+          response.data.removed
+            ? messages.removalremoved
+            : messages.removalwaiting,
+          {
+            received: response.data.received,
+            required: response.data.required,
+            arr: arrName,
+          }
+        ),
+        {
+          appearance: 'success',
+          autoDismiss: true,
+        }
+      );
+    } catch {
+      addToast(intl.formatMessage(messages.removalerror), {
+        appearance: 'error',
+        autoDismiss: true,
+      });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  if (summary?.removed) {
+    return null;
+  }
+
+  return (
+    <div className="w-full">
+      {summary?.currentUserRequested ? (
+        <Button
+          className="w-full"
+          buttonType="danger"
+          disabled={pending}
+          onClick={() => submit('delete')}
+        >
+          <XMarkIcon />
+          <span>{intl.formatMessage(messages.cancelremovalrequest)}</span>
+        </Button>
+      ) : (
+        <ConfirmButton
+          className="w-full"
+          onClick={() => submit('post')}
+          confirmText={intl.formatMessage(globalMessages.areyousure)}
+        >
+          <TrashIcon />
+          <span>{intl.formatMessage(messages.requestremoval)}</span>
+        </ConfirmButton>
+      )}
+      {summary && summary.required > 0 && (
+        <div className="mt-1 text-xs text-gray-400">
+          {intl.formatMessage(messages.removalprogress, {
+            received: summary.received,
+            required: summary.required,
+          })}
+        </div>
+      )}
+    </div>
+  );
 };
 
 interface RequestItemErrorProps {
@@ -312,7 +420,7 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
     inView ? url : null
   );
   const { data: requestData, mutate: revalidate } = useSWR<
-    NonFunctionProperties<MediaRequest>
+    NonFunctionProperties<MediaRequest> & { removal?: RemovalSummary | null }
   >(`/api/v1/request/${request.id}`, {
     fallbackData: request,
     refreshInterval: refreshIntervalHelper(
@@ -782,6 +890,21 @@ const RequestItem = ({ request, revalidateList }: RequestItemProps) => {
                 <XMarkIcon />
                 <span>{intl.formatMessage(messages.cancelRequest)}</span>
               </ConfirmButton>
+            )}
+          {!hasPermission(Permission.MANAGE_REQUESTS) &&
+            requestData.requestedBy.id === user?.id &&
+            (requestData.status === MediaRequestStatus.APPROVED ||
+              requestData.status === MediaRequestStatus.COMPLETED) && (
+              <RemovalRequestButton
+                mediaId={requestData.media.id}
+                is4k={requestData.is4k}
+                arrName={requestData.type === 'movie' ? 'Radarr' : 'Sonarr'}
+                initial={requestData.removal ?? request.removal}
+                onChanged={() => {
+                  revalidate();
+                  revalidateList();
+                }}
+              />
             )}
         </div>
       </div>
