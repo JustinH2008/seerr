@@ -1280,6 +1280,30 @@ components:
       required:
         - id
         - status
+    MediaRemovalStatus:
+      type: object
+      properties:
+        required:
+          type: number
+          description: Number of people who requested this copy
+        received:
+          type: number
+          description: Number of those people who have asked to remove it
+        currentUserRequested:
+          type: boolean
+        removed:
+          type: boolean
+        requesters:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: number
+              displayName:
+                type: string
+              requestedRemoval:
+                type: boolean
     MediaInfo:
       type: object
       properties:
@@ -7361,6 +7385,82 @@ paths:
       responses:
         '204':
           description: Successfully removed media item
+  /media/{mediaId}/removal:
+    get:
+      summary: Get requester removal status
+      description: Shows how many people who requested this title have asked to remove it.
+      tags:
+        - media
+      parameters:
+        - in: path
+          name: mediaId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: is4k
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Removal status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRemovalStatus'
+        '403':
+          description: Caller did not request this title
+    post:
+      summary: Request removal of a title you requested
+      description: Records the caller's agreement to remove the title. The title is removed from Radarr or Sonarr only after every person who requested it has agreed.
+      tags:
+        - media
+      parameters:
+        - in: path
+          name: mediaId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: is4k
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Updated removal status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRemovalStatus'
+        '403':
+          description: Caller did not request this title
+    delete:
+      summary: Cancel your removal request
+      description: Withdraws the caller's agreement before the title is removed.
+      tags:
+        - media
+      parameters:
+        - in: path
+          name: mediaId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: is4k
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Updated removal status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaRemovalStatus'
+        '403':
+          description: Caller did not request this title
   /media/{mediaId}/{status}:
     post:
       summary: Update media status
